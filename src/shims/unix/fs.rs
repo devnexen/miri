@@ -265,7 +265,7 @@ impl FileDescription for FileHandle {
 
 impl<'tcx> EvalContextExtPrivate<'tcx> for crate::MiriInterpCx<'tcx> {}
 trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
-    fn macos_stat_write_buf(
+    fn macos_fbsd_solaris_write_buf(
         &mut self,
         metadata: FileMetadata,
         buf_op: &OpTy<'tcx>,
@@ -279,7 +279,6 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
         let (modified_sec, modified_nsec) = metadata.modified.unwrap_or((0, 0));
 
         let buf = this.deref_pointer_as(buf_op, this.libc_ty_layout("stat"))?;
-
         this.write_int_fields_named(
             &[
                 ("st_dev", 0),
@@ -290,21 +289,29 @@ trait EvalContextExtPrivate<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 ("st_gid", 0),
                 ("st_rdev", 0),
                 ("st_atime", access_sec.into()),
-                ("st_atime_nsec", access_nsec.into()),
                 ("st_mtime", modified_sec.into()),
-                ("st_mtime_nsec", modified_nsec.into()),
                 ("st_ctime", 0),
-                ("st_ctime_nsec", 0),
-                ("st_birthtime", created_sec.into()),
-                ("st_birthtime_nsec", created_nsec.into()),
                 ("st_size", metadata.size.into()),
                 ("st_blocks", 0),
                 ("st_blksize", 0),
-                ("st_flags", 0),
-                ("st_gen", 0),
             ],
             &buf,
         )?;
+
+        if matches!(&*this.tcx.sess.target.os, "macos" | "freebsd") {
+            this.write_int_fields_named(
+                &[
+                    ("st_atime_nsec", access_nsec.into()),
+                    ("st_mtime_nsec", modified_nsec.into()),
+                    ("st_ctime_nsec", 0),
+                    ("st_birthtime", created_sec.into()),
+                    ("st_birthtime_nsec", created_nsec.into()),
+                    ("st_flags", 0),
+                    ("st_gen", 0),
+                ],
+                &buf,
+            )?;
+        }
 
         interp_ok(0)
     }
@@ -648,15 +655,15 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_i32(this.try_unwrap_io_result(result)?))
     }
 
-    fn macos_fbsd_stat(
+    fn macos_fbsd_solaris_stat(
         &mut self,
         path_op: &OpTy<'tcx>,
         buf_op: &OpTy<'tcx>,
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd") {
-            panic!("`macos_fbsd_stat` should not be called on {}", this.tcx.sess.target.os);
+        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd" | "solaris" | "illumos") {
+            panic!("`macos_fbsd_solaris_stat` should not be called on {}", this.tcx.sess.target.os);
         }
 
         let path_scalar = this.read_pointer(path_op)?;
@@ -674,19 +681,22 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(err) => return this.set_last_error_and_return_i32(err),
         };
 
-        interp_ok(Scalar::from_i32(this.macos_stat_write_buf(metadata, buf_op)?))
+        interp_ok(Scalar::from_i32(this.macos_fbsd_solaris_write_buf(metadata, buf_op)?))
     }
 
     // `lstat` is used to get symlink metadata.
-    fn macos_fbsd_lstat(
+    fn macos_fbsd_solaris_lstat(
         &mut self,
         path_op: &OpTy<'tcx>,
         buf_op: &OpTy<'tcx>,
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd") {
-            panic!("`macos_fbsd_lstat` should not be called on {}", this.tcx.sess.target.os);
+        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd" | "solaris" | "illumos") {
+            panic!(
+                "`macos_fbsd_solaris_lstat` should not be called on {}",
+                this.tcx.sess.target.os
+            );
         }
 
         let path_scalar = this.read_pointer(path_op)?;
@@ -703,18 +713,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Err(err) => return this.set_last_error_and_return_i32(err),
         };
 
-        interp_ok(Scalar::from_i32(this.macos_stat_write_buf(metadata, buf_op)?))
+        interp_ok(Scalar::from_i32(this.macos_fbsd_solaris_write_buf(metadata, buf_op)?))
     }
 
-    fn macos_fbsd_fstat(
+    fn macos_fbsd_solaris_fstat(
         &mut self,
         fd_op: &OpTy<'tcx>,
         buf_op: &OpTy<'tcx>,
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd") {
-            panic!("`macos_fbsd_fstat` should not be called on {}", this.tcx.sess.target.os);
+        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd" | "solaris" | "illumos") {
+            panic!(
+                "`macos_fbsd_solaris_fstat` should not be called on {}",
+                this.tcx.sess.target.os
+            );
         }
 
         let fd = this.read_scalar(fd_op)?.to_i32()?;
@@ -730,7 +743,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
             Ok(metadata) => metadata,
             Err(err) => return this.set_last_error_and_return_i32(err),
         };
-        interp_ok(Scalar::from_i32(this.macos_stat_write_buf(metadata, buf_op)?))
+        interp_ok(Scalar::from_i32(this.macos_fbsd_solaris_write_buf(metadata, buf_op)?))
     }
 
     fn linux_statx(
@@ -1112,7 +1125,7 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         interp_ok(Scalar::from_maybe_pointer(entry.unwrap_or_else(Pointer::null), this))
     }
 
-    fn macos_fbsd_readdir_r(
+    fn macos_fbsd_solaris_readdir_r(
         &mut self,
         dirp_op: &OpTy<'tcx>,
         entry_op: &OpTy<'tcx>,
@@ -1120,8 +1133,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     ) -> InterpResult<'tcx, Scalar> {
         let this = self.eval_context_mut();
 
-        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd") {
-            panic!("`macos_fbsd_readdir_r` should not be called on {}", this.tcx.sess.target.os);
+        if !matches!(&*this.tcx.sess.target.os, "macos" | "freebsd" | "solaris" | "illumos") {
+            panic!(
+                "`macos_fbsd_solaris_readdir_r` should not be called on {}",
+                this.tcx.sess.target.os
+            );
         }
 
         let dirp = this.read_target_usize(dirp_op)?;
