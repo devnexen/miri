@@ -1014,8 +1014,6 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
 
     const PANIC_ON_ALLOC_FAIL: bool = false;
 
-    const TRACING_ENABLED: bool = cfg!(feature = "tracing");
-
     #[inline(always)]
     fn enforce_alignment(ecx: &MiriInterpCx<'tcx>) -> bool {
         ecx.machine.check_alignment != AlignmentCheck::None
@@ -1199,7 +1197,7 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
             ExternAbi::Rust,
             &[],
             None,
-            StackPopCleanup::Goto { ret: None, unwind: mir::UnwindAction::Unreachable },
+            ReturnContinuation::Goto { ret: None, unwind: mir::UnwindAction::Unreachable },
         )?;
         interp_ok(())
     }
@@ -1826,6 +1824,18 @@ impl<'tcx> Machine<'tcx> for MiriMachine<'tcx> {
         }
         #[cfg(not(target_os = "linux"))]
         MiriAllocParams::Global
+    }
+
+    fn enter_trace_span(span: impl FnOnce() -> tracing::Span) -> impl EnteredTraceSpan {
+        #[cfg(feature = "tracing")]
+        {
+            span().entered()
+        }
+        #[cfg(not(feature = "tracing"))]
+        {
+            let _ = span; // so we avoid the "unused variable" warning
+            ()
+        }
     }
 }
 
